@@ -10,12 +10,19 @@ import {Base64} from "./libraries/Base64.sol";
 
 import "hardhat/console.sol";
 
+error Unauthorized();
+error AlreadyRegistered();
+error InvalidName(string name);
+
+
 // We inherit the contract we imported. This means we'll have access
 // to the inherited contract's methods.
 contract Domains is ERC721URIStorage {
+
   // Magic given to us by OpenZeppelin to help us keep track of tokenIds.
   using Counters for Counters.Counter;
   Counters.Counter private _tokenIds;
+  address payable public owner;
 
   string public tld;
 	
@@ -25,14 +32,35 @@ contract Domains is ERC721URIStorage {
 
   mapping(string => address) public domains;
   mapping(string => string) public records;
+  // Add this at the top of your contract next to the other mappings
+  mapping (uint => string) public names;
 
   constructor(string memory _tld) payable ERC721("Doge Circle Name Service", "DCNS") {
+    owner = payable(msg.sender);
     tld = _tld;
     console.log("%s name service deployed", _tld);
   }
 
+  function getAllNames() public view returns (string[] memory) {
+    console.log("Getting all names from contract");
+    string[] memory allNames = new string[](_tokenIds.current());
+    for (uint i = 0; i < _tokenIds.current(); i++) {
+      allNames[i] = names[i];
+      console.log("Name for token %d is %s", i, allNames[i]);
+    }
+
+    return allNames;
+  }
+
+  function valid(string calldata name) public pure returns(bool) {
+    return StringUtils.strlen(name) >= 3 && StringUtils.strlen(name) <= 10;
+  }
+
+
   function register(string calldata name) public payable {
     // check if domain name is unregistered on chain
+    if (domains[name] != address(0)) revert AlreadyRegistered();
+    if (!valid(name)) revert InvalidName(name);
     require(domains[name] == address(0));
 
     uint256 _price = price(name);
@@ -76,6 +104,7 @@ contract Domains is ERC721URIStorage {
     domains[name] = msg.sender;
 
     _tokenIds.increment();
+    names[newRecordId] = name;
   }
 
   // This function will give us the price of a domain based on length
@@ -98,6 +127,7 @@ contract Domains is ERC721URIStorage {
 
   function setRecord(string calldata name, string calldata record) public {
       // Check that the owner is the transaction sender
+      if (msg.sender != domains[name]) revert Unauthorized();
       require(domains[name] == msg.sender);
       records[name] = record;
   }
@@ -105,4 +135,21 @@ contract Domains is ERC721URIStorage {
   function getRecord(string calldata name) public view returns(string memory) {
       return records[name];
   }
+
+  modifier onlyOwner() {
+    require(isOwner());
+    _;
+  }
+
+  function isOwner() public view returns (bool) {
+    return msg.sender == owner;
+  }
+
+  function withdraw() public onlyOwner {
+    uint amount = address(this).balance;
+    
+    (bool success, ) = msg.sender.call{value: amount}("");
+    require(success, "Failed to withdraw Matic");
+  } 
+
 }
